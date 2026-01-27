@@ -15,19 +15,18 @@ transformers_ver = version.parse(transformers.__version__)
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
 parser.add_argument("--checkpoint_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512/")
 parser.add_argument("--ov_mode_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov/")
-parser.add_argument("--llm_output_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-llm/")
-parser.add_argument("--checkpoint_dir4", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-llm/")
+parser.add_argument("--llm_tmp_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-llm/")
 args = parser.parse_args()
 
 def save_llama_to_transformer4(model, args) :
-    if args.llm_output_dir is None:
-        args.llm_output_dir = "/tmp/llm"
-    model.language_model.save_pretrained(args.llm_output_dir)
-    print(f"language_model saved to {args.llm_output_dir}, convert later with transformers 4.x")
+    if args.llm_tmp_dir is None:
+        args.llm_tmp_dir = "/tmp/llm"
+    model.language_model.save_pretrained(args.llm_tmp_dir)
+    print(f"language_model saved to {args.llm_tmp_dir}, convert later with transformers 4.x")
     
 def convert_llama_to_ov(args) :
     processor = None
-    llm_model = AutoModelForCausalLM.from_pretrained(args.checkpoint_dir4, device_map="cpu", trust_remote_code=True)
+    llm_model = AutoModelForCausalLM.from_pretrained(args.llm_tmp_dir, device_map="cpu", trust_remote_code=True)
     llm_model.config._attn_implementation = "eager"
     llm_model = llm_model.float()
     llm_model.eval()
