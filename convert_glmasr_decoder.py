@@ -14,7 +14,7 @@ transformers_ver = version.parse(transformers.__version__)
 
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
 parser.add_argument("--checkpoint_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512/")
-parser.add_argument("--ov_mode_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov/")
+parser.add_argument("--ov_mode_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov1/")
 parser.add_argument("--llm_tmp_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-llm/")
 args = parser.parse_args()
 
@@ -80,17 +80,62 @@ def convert_other_to_ov(args) :
     input_features_mask = torch.randint(0, 1, (1, 3000), dtype=torch.long)
 
     dec_wrapper = GlmAsrForOVConvertWrapper(model, processor, args.ov_mode_dir + "/ov_model0")
+    dec_wrapper.convert_config_to_ov()
     dec_wrapper.convert_encoder_to_ov(input_ids, input_features, input_features_mask)
 
     dec_wrapper1 = GlmAsrForOVConvertWrapper1(model, processor, args.ov_mode_dir + "/ov_model1")
+    dec_wrapper1.convert_config_to_ov()
     dec_wrapper1.convert_inputs_emb_to_ov(input_ids)
     dec_wrapper1.convert_audio_emb_to_ov(input_features, input_features_mask)
     
     save_llama_to_transformer4(model, args)
 
+def convert_models_to_ov(args) :
+    processor = AutoProcessor.from_pretrained(args.checkpoint_dir, device_map="cpu")
+
+    model = AutoModel.from_pretrained(args.checkpoint_dir, dtype=torch.float, device_map="cpu")
+    model = model.float()
+    model.eval()
+
+    #input_features=torch.Size([1, 128, 3000]), input_features_mask=torch.Size([1, 3000])
+    seq_len = 90
+    audio_length = 3000
+    input_ids=torch.randint(0, 1000, (1, 90), dtype=torch.long)
+    input_features = torch.randn((input_ids.shape[0], model.config.text_config.head_dim, audio_length), dtype=torch.float)
+    input_features_mask = torch.randint(0, 1, (1, audio_length), dtype=torch.long)
+
+    audio_embeds = torch.zeros((input_ids.shape[0], 1))
+    audio_token_mask = torch.tensor([False]).reshape((input_ids.shape[0],1,1))
+    attention_mask = torch.ones((input_ids.shape[0], seq_len+1), dtype=torch.long)
+    position_ids=torch.tensor([[seq_len]], dtype=torch.long)
+    cache_position=torch.tensor([seq_len], dtype=torch.long)
+    inputs_embeds=torch.randn((input_ids.shape[0], 1, model.config.text_config.hidden_size), dtype=torch.float)
+    past_key_values = []
+    for _ in range(model.config.text_config.num_hidden_layers):
+        key = torch.randn((1, model.config.text_config.num_key_value_heads, seq_len, model.config.text_config.head_dim), dtype=torch.float)
+        value = torch.randn((1, model.config.text_config.num_key_value_heads, seq_len, model.config.text_config.head_dim), dtype=torch.float)
+        past_key_values.append((key, value))
+
+
+    dec_wrapper = GlmAsrForOVConvertWrapper(model, processor, args.ov_mode_dir + "/ov_model0")
+    dec_wrapper.convert_encoder_to_ov(input_ids, input_features, input_features_mask)
+    dec_wrapper.convert_decoder_to_ov(input_ids=input_ids, audio_embeds=audio_embeds,
+                                      audio_token_mask=audio_token_mask, attention_mask=attention_mask,
+                                      position_ids=position_ids, cache_position=cache_position,
+                                      past_key_values=past_key_values)
+
+
+    dec_wrapper1 = GlmAsrForOVConvertWrapper1(model, processor, args.ov_mode_dir + "/ov_model1")
+    dec_wrapper1.convert_inputs_emb_to_ov(input_ids)
+    dec_wrapper1.convert_audio_emb_to_ov(input_features, input_features_mask)
+    dec_wrapper1.convert_decoder_to_ov(inputs_embeds=inputs_embeds, attention_mask=attention_mask,
+                                       position_ids=position_ids, cache_position=cache_position,
+                                      past_key_values=past_key_values)
+
 if __name__ == "__main__":
     args.checkpoint_dir = Path(args.checkpoint_dir)
     args.ov_model_dir = Path(args.ov_mode_dir)
+    # convert_models_to_ov(args)
     if transformers_ver.major >= 5:
         convert_other_to_ov(args)
     else :

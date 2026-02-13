@@ -7,7 +7,7 @@ from pathlib import Path
 from transformers.generation import GenerationMixin
 # from transformers.modeling_utils import PreTrainedModel
 from ov_model_helper import GlmAsrForOVConvertWrapper, GlmAsrForOVConvertWrapper1
-from ov_operator_async import GlmAsrEncDecModel, GlmAsrEncDecModel1
+from ov_operator_async import GlmAsrEncDecModel, GlmAsrEncDecModel1, GlmAsrProcessor
  
 
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
@@ -21,14 +21,37 @@ parser.add_argument("--max_new_tokens", "-m", type=int, default=128)
 parser.add_argument("--loop", "-l", type=int, default=10)
 args = parser.parse_args()
 
-model_bf16 = AutoModel.from_pretrained(args.checkpoint_dir, dtype=torch.bfloat16, device_map="cpu")
-model_bf16.eval()
+try :
+    model_bf16 = AutoModel.from_pretrained(args.checkpoint_dir, dtype=torch.bfloat16, device_map="cpu")
+    model_bf16.eval()
+except:
+    model_bf16 = None
+try:
+    model_f32 = AutoModel.from_pretrained(args.checkpoint_dir, dtype=torch.float, device_map="cpu")
+    model_f32 = model_f32.float()
+    model_f32.eval()
+except:
+    model_f32 = None
 
-model_f32 = AutoModel.from_pretrained(args.checkpoint_dir, dtype=torch.float, device_map="cpu")
-model_f32 = model_f32.float()
-model_f32.eval()
+from transformers.audio_utils import AudioInput, make_list_of_audio
+from transformers.feature_extraction_utils import BatchFeature
+from transformers.processing_utils import ProcessingKwargs, ProcessorMixin, Unpack
+from transformers.tokenization_utils_base import TextInput
 
-processor = AutoProcessor.from_pretrained(args.ov_model_dir+"/ov_model0", device_map="cpu")
+processor_path = args.ov_model_dir+"ov_model0"
+processor = AutoProcessor.from_pretrained(processor_path, device_map="cpu", trust_remote_code=True)
+
+print(f"processor={processor}")
+
+if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
+    print(f"tokenizer vocab size: {processor.tokenizer.vocab_size}")
+else:
+    print(f"processor don't have tokenizer")
+            
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(processor_path, trust_remote_code=True)
+    processor = GlmAsrProcessor(feature_extractor=processor, tokenizer=tokenizer)
+    
 inputs_f32 = processor.apply_transcription_request(args.audio, return_tensors="pt")
 inputs_bf16 = inputs_f32.copy()
 inputs_bf16 = inputs_bf16.to("cpu", dtype=torch.bfloat16)
@@ -38,19 +61,22 @@ ov_model = GlmAsrEncDecModel(ov_core=None, model_path=args.ov_model_dir+"/ov_mod
 # if ov_model.converted_to_ov:
 #     ov_model = GlmAsrForOVConvertWrapper(model_f32, processor, args.ov_model_dir+"/ov_model0")
 
-ov_model1 = GlmAsrEncDecModel1(ov_core=None, model_path=args.ov_model_dir+"ov_model1/", enc_type='bf16', dec_type='bf16', cache_size=1000)
+ov_model1 = GlmAsrEncDecModel1(ov_core=None, model_path=args.ov_model_dir+"ov_model1/", enc_type='f16', dec_type='bf16', cache_size=1000)
 # if ov_model1.converted_to_ov:
 #     ov_model1 = GlmAsrForOVConvertWrapper1(model_f32, processor, args.ov_model_dir+"ov_model1/")
-
+torch_outputs=[]
+torch_outputs1=[]
 print(f"#############################################")
 start_time = time.perf_counter()
 with torch.no_grad():
-    torch_outputs = model_bf16.generate(**inputs_bf16, max_new_tokens=args.max_new_tokens, do_sample=False)
+    if model_bf16 :
+        torch_outputs = model_bf16.generate(**inputs_bf16, max_new_tokens=args.max_new_tokens, do_sample=False)
 torch_warmup_time = time.perf_counter() - start_time
 print(f"#############################################")
 start_time = time.perf_counter()
 with torch.no_grad():
-    torch_outputs1 = model_f32.generate(**inputs_f32, max_new_tokens=args.max_new_tokens, do_sample=False)
+    if model_f32 :
+        torch_outputs1 = model_f32.generate(**inputs_f32, max_new_tokens=args.max_new_tokens, do_sample=False)
 torch_warmup_time1 = time.perf_counter() - start_time
 print(f"#############################################")
 start_time = time.perf_counter()
