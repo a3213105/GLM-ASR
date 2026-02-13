@@ -100,13 +100,13 @@ def convert_models_to_ov(args) :
     #input_features=torch.Size([1, 128, 3000]), input_features_mask=torch.Size([1, 3000])
     seq_len = 90
     audio_length = 3000
-    input_ids=torch.randint(0, 1000, (1, 90), dtype=torch.long)
+    input_ids=torch.randint(0, 1000, (1, seq_len), dtype=torch.long)
     input_features = torch.randn((input_ids.shape[0], model.config.text_config.head_dim, audio_length), dtype=torch.float)
     input_features_mask = torch.randint(0, 1, (1, audio_length), dtype=torch.long)
 
     audio_embeds = torch.zeros((input_ids.shape[0], 1))
     audio_token_mask = torch.tensor([False]).reshape((input_ids.shape[0],1,1))
-    attention_mask = torch.ones((input_ids.shape[0], seq_len+1), dtype=torch.long)
+    attention_mask = torch.ones((input_ids.shape[0], seq_len + 1), dtype=torch.long)
     position_ids=torch.tensor([[seq_len]], dtype=torch.long)
     cache_position=torch.tensor([seq_len], dtype=torch.long)
     inputs_embeds=torch.randn((input_ids.shape[0], 1, model.config.text_config.hidden_size), dtype=torch.float)

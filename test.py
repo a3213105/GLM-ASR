@@ -7,7 +7,7 @@ from pathlib import Path
 from transformers.generation import GenerationMixin
 # from transformers.modeling_utils import PreTrainedModel
 from ov_model_helper import GlmAsrForOVConvertWrapper, GlmAsrForOVConvertWrapper1
-from ov_operator_async import GlmAsrEncDecModel, GlmAsrEncDecModel1, GlmAsrProcessor
+from ov_operator_async import GlmAsrEncDecModel, GlmAsrEncDecModel1
  
 
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
@@ -38,32 +38,21 @@ from transformers.feature_extraction_utils import BatchFeature
 from transformers.processing_utils import ProcessingKwargs, ProcessorMixin, Unpack
 from transformers.tokenization_utils_base import TextInput
 
-processor_path = args.ov_model_dir+"ov_model0"
-processor = AutoProcessor.from_pretrained(processor_path, device_map="cpu", trust_remote_code=True)
-
-print(f"processor={processor}")
-
-if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
-    print(f"tokenizer vocab size: {processor.tokenizer.vocab_size}")
-else:
-    print(f"processor don't have tokenizer")
-            
-    from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(processor_path, trust_remote_code=True)
-    processor = GlmAsrProcessor(feature_extractor=processor, tokenizer=tokenizer)
+processor = AutoProcessor.from_pretrained(args.checkpoint_dir, device_map="cpu", trust_remote_code=True)
     
 inputs_f32 = processor.apply_transcription_request(args.audio, return_tensors="pt")
 inputs_bf16 = inputs_f32.copy()
 inputs_bf16 = inputs_bf16.to("cpu", dtype=torch.bfloat16)
 
+convert_model = True
 
-ov_model = GlmAsrEncDecModel(ov_core=None, model_path=args.ov_model_dir+"/ov_model0", enc_type='bf16', dec_type='bf16', cache_size=1000)
-# if ov_model.converted_to_ov:
-#     ov_model = GlmAsrForOVConvertWrapper(model_f32, processor, args.ov_model_dir+"/ov_model0")
+if convert_model:
+    ov_model = GlmAsrForOVConvertWrapper(model_f32, processor, args.ov_model_dir+"/ov_model0")
+    ov_model1 = GlmAsrForOVConvertWrapper1(model_f32, processor, args.ov_model_dir+"ov_model1/")
+else :
+    ov_model = GlmAsrEncDecModel(ov_core=None, model_path=args.ov_model_dir+"/ov_model0", enc_type='bf16', dec_type='bf16', cache_size=1000)
+    ov_model1 = GlmAsrEncDecModel1(ov_core=None, model_path=args.ov_model_dir+"ov_model1/", enc_type='f16', dec_type='bf16', cache_size=1000)
 
-ov_model1 = GlmAsrEncDecModel1(ov_core=None, model_path=args.ov_model_dir+"ov_model1/", enc_type='f16', dec_type='bf16', cache_size=1000)
-# if ov_model1.converted_to_ov:
-#     ov_model1 = GlmAsrForOVConvertWrapper1(model_f32, processor, args.ov_model_dir+"ov_model1/")
 torch_outputs=[]
 torch_outputs1=[]
 print(f"#############################################")

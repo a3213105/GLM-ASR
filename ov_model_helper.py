@@ -588,6 +588,22 @@ GLMASR_Encoder_MODEL_NAME = "glm_asr_encoder.xml"
 GLMASR_Decoder_MODEL_NAME = "glm_asr_decoder.xml"
 GLMASR_OV_CONFIG_NAME = "ov_config.yaml"
 
+def to_legacy_cache(past_key_values):
+    if transformers_ver.major >= 5:
+        past_key_values_list = []
+        for keys, values, attr  in past_key_values:
+            past_key_values_list.append((keys, values))
+        return past_key_values_list
+    else :
+        return past_key_values.to_legacy_cache()
+
+def from_legacy_cache(past_key_values):
+    if transformers_ver.major >= 5:
+        past_key_values = DynamicCache(ddp_cache_data=past_key_values)
+    else :
+        past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+    return past_key_values
+
 class GlmAsrForOVConvertWrapper(GenerationMixin):
     _is_stateful = True   # or False
     _keep_in_fp32_modules_strict = None
@@ -596,7 +612,7 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
 
     def __init__(self, model, processor, ov_model_path):
         super().__init__()
-        model.config._attn_implementation = "eager"
+        # model.config._attn_implementation = "eager"
         self.processor = processor 
         self.config = model.config
         self.generation_config = model.generation_config
@@ -612,6 +628,10 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
             def forward(self, input_features, input_features_mask):
                 with torch.no_grad():
                     audio_embeds = self.model.get_audio_features(input_features, input_features_mask)
+                    # from transformers.modeling_outputs import BaseModelOutputWithPooling
+                    # if isinstance(audio_embeds, BaseModelOutputWithPooling) or hasattr(audio_embeds, 'pooler_output'):
+                    if hasattr(audio_embeds, 'pooler_output'):
+                        audio_embeds = audio_embeds.pooler_output
                 return audio_embeds
 
         class ModelDecoderWrapper(torch.nn.Module):
@@ -625,9 +645,8 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                     inputs_embeds = inputs_embeds.masked_scatter(
                         audio_token_mask.to(inputs_embeds.device), audio_embeds.to(inputs_embeds.dtype)
                         )
-
                     if isinstance(past_key_values, list) or isinstance(past_key_values, tuple):
-                        past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                        past_key_values = from_legacy_cache(past_key_values)
 
                     result = self.language_model(
                         inputs_embeds=inputs_embeds,
@@ -640,8 +659,7 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                         logits_to_keep=1,
                         return_dict=True,
                     )
-                    # past_key_values = to_legacy_cache(pkv)
-                    past_key_values = result.past_key_values.to_legacy_cache()
+                    past_key_values = to_legacy_cache(result.past_key_values)
                     return result.logits, past_key_values
 
         self.enc_wrapper = ModelEncoderWrapper(model)
@@ -861,7 +879,7 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                           "past_key_values": past_key_values}
         logits, past_key_values = self.dec_wrapper(**example_inputs)
 
-        output = CausalLMOutputWithPast(logits=logits1, past_key_values=DynamicCache.from_legacy_cache(past_key_values))
+        output = CausalLMOutputWithPast(logits=logits1, past_key_values=from_legacy_cache(past_key_values))
         return output
 
     def convert_config_to_ov(self):
@@ -938,13 +956,13 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                            "cache_position",]
             output_names = ["logits"]
             if isinstance(past_key_values, DynamicCache):
-                past_key_values = past_key_values.to_legacy_cache()
+                past_key_values = to_legacy_cache(past_key_values)
             for i, cache in enumerate(past_key_values):
                 input_names.extend([f"key_values.{i}.key", f"key_values.{i}.value"])
                 output_names.extend([f"present.{i}.key", f"present.{i}.value"])
 
             example_ov_inputs['past_key_values'] = past_key_values
-            
+
             with torch.no_grad():
                 ov_model = ov.convert_model(self.dec_wrapper, example_input=example_ov_inputs)
             
@@ -965,7 +983,7 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
 
         example_inputs['past_key_values'] = past_key_values
         logits, past_key_values = self.dec_wrapper(**example_inputs)
-        output = CausalLMOutputWithPast(logits=logits, past_key_values=DynamicCache.from_legacy_cache(past_key_values))
+        output = CausalLMOutputWithPast(logits=logits, past_key_values=from_legacy_cache(past_key_values))
         return output
     
     def convert_to_ov(self, input_ids, input_features, input_features_mask, attention_mask, position_ids,
