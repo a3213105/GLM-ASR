@@ -14,7 +14,7 @@ transformers_ver = version.parse(transformers.__version__)
 
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
 parser.add_argument("--checkpoint_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512/")
-parser.add_argument("--ov_mode_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov1/")
+parser.add_argument("--ov_mode_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov/")
 parser.add_argument("--llm_tmp_dir", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-llm/")
 args = parser.parse_args()
 

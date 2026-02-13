@@ -612,7 +612,7 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
 
     def __init__(self, model, processor, ov_model_path):
         super().__init__()
-        # model.config._attn_implementation = "eager"
+        model.config._attn_implementation = "eager"
         self.processor = processor 
         self.config = model.config
         self.generation_config = model.generation_config
@@ -1208,6 +1208,42 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
         logits, past_key_values = self.dec_wrapper(**example_inputs)
         output = CausalLMOutputWithPast(logits=logits, past_key_values=DynamicCache.from_legacy_cache(past_key_values))
         return output
+
+    def convert_config_to_ov(self):
+        # Save model config.json
+        self.config.save_pretrained(self.ov_config_path.parent)
+        
+        # Save model generation_config.json
+        self.generation_config.save_pretrained(self.ov_config_path.parent)
+        
+        # Save model processor_config.json
+        self.processor.save_pretrained(self.ov_config_path.parent)
+        
+        # Save model processor for Transformers v4
+        self.processor.save_pretrained(self.ov_config_path.parent / "v4")
+
+        # Save model tokenizer
+        ### Update tokenizer special tokens 
+        import json
+        tokenizer_config_file = self.ov_config_path.parent / "v4/tokenizer_config.json"
+        with open(tokenizer_config_file, encoding="utf-8") as tokenizer_config_handle:
+            tokenizer_config_init_kwargs = json.load(tokenizer_config_handle)
+
+        extra_special_tokens = tokenizer_config_init_kwargs.pop("extra_special_tokens", ())
+        extra_special_tokens_dict = {}
+        for extra_special_token in extra_special_tokens:
+            extra_special_tokens_dict[extra_special_token] = extra_special_token
+        tokenizer_config_init_kwargs["extra_special_tokens"] = extra_special_tokens_dict
+        tokenizer_config_init_kwargs["tokenizer_class"] = 'Qwen2TokenizerFast'
+        
+        
+        with open(tokenizer_config_file, "w", encoding="utf-8") as f:
+            json.dump(tokenizer_config_init_kwargs, f, ensure_ascii=False, indent=2)
+
+        import yaml      
+        ov_config_data = {"main_input_name" : self.main_input_name}
+        with open(self.ov_config_path, "w") as f:
+            yaml.safe_dump(ov_config_data, f)
 
     def convert_audio_emb_to_ov(self, input_features, input_features_mask):       
         example_inputs = {"input_features":input_features, "input_features_mask":input_features_mask}
