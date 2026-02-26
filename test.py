@@ -12,7 +12,7 @@ from ov_operator_async import GlmAsrEncDecModel, GlmAsrEncDecModel1
 
 parser = argparse.ArgumentParser(description="Minimal ASR transcription demo.")
 parser.add_argument("--checkpoint_dir", "-c", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512/")
-parser.add_argument("--ov_model_dir", "-o", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov/")
+parser.add_argument("--ov_model_dir", "-o", type=str, default=f"{Path(__file__).parent}/../GLM-ASR-Nano-2512-ov1/")
 parser.add_argument("--audio", "-a", type=str, default="examples/example_zh.wav",
                     help="Path to audio file.")
 parser.add_argument("--tokenizer_path", "-t", type=str, default=None,

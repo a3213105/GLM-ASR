@@ -640,6 +640,14 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                 self.language_model = model.language_model.eval()
 
             def forward(self, input_ids, audio_embeds, audio_token_mask, attention_mask, position_ids, cache_position, past_key_values):
+                print(f"## input_ids={input_ids.shape}, audio_embeds={audio_embeds.shape}, "
+                  f"audio_token_mask={audio_token_mask.shape}, attention_mask={attention_mask.shape}, "
+                  f"position_ids={position_ids.shape}, cache_position={cache_position.shape}, "
+                  f"cache_position={input_ids.shape}, input_ids={input_ids.shape}")
+                if past_key_values is not None:
+                    print(f"past_key_values={len(past_key_values)}, past_key_values[0][0]={past_key_values[0][0].shape}, "
+                          f"past_key_values[0][1]={past_key_values[0][1].shape}")
+
                 with torch.no_grad():
                     inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
                     inputs_embeds = inputs_embeds.masked_scatter(
@@ -660,6 +668,11 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                         return_dict=True,
                     )
                     past_key_values = to_legacy_cache(result.past_key_values)
+                    logits = result.logits
+                    print(f"## output logits={logits.shape}, "
+                          f"past_key_values={len(past_key_values)}, "
+                          f"past_key_values[0][0]={past_key_values[0][0].shape}, "
+                          f"past_key_values[0][1]={past_key_values[0][1].shape}")
                     return result.logits, past_key_values
 
         self.enc_wrapper = ModelEncoderWrapper(model)
@@ -962,7 +975,6 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                 output_names.extend([f"present.{i}.key", f"present.{i}.value"])
 
             example_ov_inputs['past_key_values'] = past_key_values
-
             with torch.no_grad():
                 ov_model = ov.convert_model(self.dec_wrapper, example_input=example_ov_inputs)
             

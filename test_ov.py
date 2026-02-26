@@ -26,7 +26,7 @@ processor = AutoProcessor.from_pretrained(processor_path, device_map="cpu")
 if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
     print(f"tokenizer vocab size: {processor.tokenizer.vocab_size}")
 else:
-    print(f"processor don't have tokenizer")
+    print(f"Transformer not support this processor (miss tokenizer), we will use adptor for this")
     from ov_operator_async import GlmAsrProcessor
     processor = GlmAsrProcessor(feature_extractor=processor, model_path=processor_path+"/v4")
     
