@@ -221,7 +221,6 @@ def patch_model_stateful(ov_model, input_names, output_names):
     patch_stateful(ov_model, input_names[0])
     return ov_model
 
-
 def causal_mask_function(batch_idx: int, head_idx: int, q_idx: int, kv_idx: int) -> bool:
     """
     This creates a basic lower-diagonal causal mask.
@@ -628,8 +627,6 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
             def forward(self, input_features, input_features_mask):
                 with torch.no_grad():
                     audio_embeds = self.model.get_audio_features(input_features, input_features_mask)
-                    # from transformers.modeling_outputs import BaseModelOutputWithPooling
-                    # if isinstance(audio_embeds, BaseModelOutputWithPooling) or hasattr(audio_embeds, 'pooler_output'):
                     if hasattr(audio_embeds, 'pooler_output'):
                         audio_embeds = audio_embeds.pooler_output
                 return audio_embeds
@@ -640,14 +637,6 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                 self.language_model = model.language_model.eval()
 
             def forward(self, input_ids, audio_embeds, audio_token_mask, attention_mask, position_ids, cache_position, past_key_values):
-                print(f"## input_ids={input_ids.shape}, audio_embeds={audio_embeds.shape}, "
-                  f"audio_token_mask={audio_token_mask.shape}, attention_mask={attention_mask.shape}, "
-                  f"position_ids={position_ids.shape}, cache_position={cache_position.shape}, "
-                  f"cache_position={input_ids.shape}, input_ids={input_ids.shape}")
-                if past_key_values is not None:
-                    print(f"past_key_values={len(past_key_values)}, past_key_values[0][0]={past_key_values[0][0].shape}, "
-                          f"past_key_values[0][1]={past_key_values[0][1].shape}")
-
                 with torch.no_grad():
                     inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
                     inputs_embeds = inputs_embeds.masked_scatter(
@@ -668,11 +657,6 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                         return_dict=True,
                     )
                     past_key_values = to_legacy_cache(result.past_key_values)
-                    logits = result.logits
-                    print(f"## output logits={logits.shape}, "
-                          f"past_key_values={len(past_key_values)}, "
-                          f"past_key_values[0][0]={past_key_values[0][0].shape}, "
-                          f"past_key_values[0][1]={past_key_values[0][1].shape}")
                     return result.logits, past_key_values
 
         self.enc_wrapper = ModelEncoderWrapper(model)
@@ -863,6 +847,16 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
             self.enc_request.start_async(example_inputs, share_inputs=True)
             self.enc_request.wait()
             audio_embeds = torch.from_numpy(self.enc_request.get_output_tensor(0).data)
+            # if torch.allclose(audio_embeds, audio_embeds1, rtol=RTOL_STRICT, atol=ATOL_STRICT, equal_nan=equal_nan) :
+            #     print(f"✅ encoder output match, {cache_position.max()}")
+            # else :
+            #     print(f"❌ encoder output not match, {cache_position.max()}")
+            #     print(f"audio_embeds={audio_embeds.shape}, audio_embeds1={audio_embeds1.shape}")
+            #     mask = ~torch.isclose(audio_embeds, audio_embeds1, rtol=RTOL_STRICT, atol=ATOL_STRICT, equal_nan=equal_nan)
+            #     diff_count = mask.sum()
+            #     print(f"total_diff={diff_count}")
+            #     row_diff = mask.any(dim=-1)
+            #     # print(f"row_diff={row_diff}")
 
             self.dec_request.reset_state()
             self.next_beam_idx = np.arange(input_ids.shape[0], dtype=int)
@@ -891,6 +885,18 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
                           "cache_position":cache_position,
                           "past_key_values": past_key_values}
         logits, past_key_values = self.dec_wrapper(**example_inputs)
+        # if torch.allclose(logits, logits1, rtol=RTOL_STRICT, atol=ATOL_STRICT, equal_nan=equal_nan) :
+        #     print(f"✅ decoder output match, {cache_position.max()}")
+        # else :
+        #     print(f"❌ decoder output not match, {cache_position.max()}")
+        #     # print(f"logits={logits.shape}, logits1={logits1.shape}")
+        #     mask = ~torch.isclose(logits, logits1, rtol=RTOL_STRICT, atol=ATOL_STRICT, equal_nan=equal_nan)
+        #     diff_count = mask.sum()
+        #     print(f"total_diff={diff_count}")
+        #     row_diff = mask.any(dim=-1)
+        #     # print(f"row_diff={row_diff}")         
+        #     diff_positions = torch.nonzero(mask)
+        #     # print(f"diff_positions={diff_positions}")
 
         output = CausalLMOutputWithPast(logits=logits1, past_key_values=from_legacy_cache(past_key_values))
         return output
@@ -921,11 +927,9 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
             extra_special_tokens_dict[extra_special_token] = extra_special_token
         tokenizer_config_init_kwargs["extra_special_tokens"] = extra_special_tokens_dict
         tokenizer_config_init_kwargs["tokenizer_class"] = 'Qwen2TokenizerFast'
-        
-        
+
         with open(tokenizer_config_file, "w", encoding="utf-8") as f:
             json.dump(tokenizer_config_init_kwargs, f, ensure_ascii=False, indent=2)
-
         import yaml      
         ov_config_data = {"main_input_name" : self.main_input_name}
         with open(self.ov_config_path, "w") as f:
@@ -973,7 +977,6 @@ class GlmAsrForOVConvertWrapper(GenerationMixin):
             for i, cache in enumerate(past_key_values):
                 input_names.extend([f"key_values.{i}.key", f"key_values.{i}.value"])
                 output_names.extend([f"present.{i}.key", f"present.{i}.value"])
-
             example_ov_inputs['past_key_values'] = past_key_values
             with torch.no_grad():
                 ov_model = ov.convert_model(self.dec_wrapper, example_input=example_ov_inputs)
@@ -1056,8 +1059,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
             def forward(self, inputs_embeds, attention_mask, position_ids, cache_position, past_key_values):
                 with torch.no_grad():
                     if isinstance(past_key_values, list) or isinstance(past_key_values, tuple):
-                        # past_key_values = DynamicCache(ddp_cache_data=past_key_values)
-                        past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                        past_key_values = from_legacy_cache(past_key_values)
 
                     result = self.model.language_model(
                         inputs_embeds=inputs_embeds,
@@ -1070,7 +1072,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
                         logits_to_keep=1,
                         return_dict=True,
                     )
-                    return result.logits, result.past_key_values.to_legacy_cache()
+                    return result.logits, to_legacy_cache(result.past_key_values)
 
         self.audio_enc_wrapper = ModelAudioEncoderWrapper(model)
         self.audio_enc_wrapper.eval()
@@ -1218,7 +1220,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
 
         example_inputs['past_key_values'] = past_key_values
         logits, past_key_values = self.dec_wrapper(**example_inputs)
-        output = CausalLMOutputWithPast(logits=logits, past_key_values=DynamicCache.from_legacy_cache(past_key_values))
+        output = CausalLMOutputWithPast(logits=logits, past_key_values=from_legacy_cache(past_key_values))
         return output
 
     def convert_config_to_ov(self):
@@ -1304,7 +1306,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
                            "cache_position",]
             output_names = ["logits"]
             if isinstance(past_key_values, DynamicCache):
-                past_key_values = past_key_values.to_legacy_cache()
+                past_key_values = to_legacy_cache(past_key_values)
             for i, cache in enumerate(past_key_values):
                 input_names.extend([f"key_values.{i}.key", f"key_values.{i}.value"])
                 output_names.extend([f"present.{i}.key", f"present.{i}.value"])
@@ -1331,7 +1333,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
 
         example_inputs['past_key_values'] = past_key_values
         logits, past_key_values = self.dec_wrapper(**example_inputs)
-        output = CausalLMOutputWithPast(logits=logits, past_key_values=DynamicCache.from_legacy_cache(past_key_values))
+        output = CausalLMOutputWithPast(logits=logits, past_key_values=from_legacy_cache(past_key_values))
         return output
 
     def convert_to_ov(self,
@@ -1368,6 +1370,7 @@ class GlmAsrForOVConvertWrapper1(GenerationMixin):
                                            quantization_config=quantization_config,
                                            **kwargs)
         return output
+
 
 FUNASR_Audio_Encoder_MODEL_NAME = "funasr_audio_encoder.xml"
 FUNASR_Audio_Encoder_CTC_MODEL_NAME = "funasr_audio_encoder_ctc.xml"
@@ -1463,7 +1466,7 @@ class FunAsrNanoConverterWrapper(GenerationMixin) :
             def forward(self, inputs_embeds, attention_mask, past_key_values):
                 with torch.no_grad():
                     if isinstance(past_key_values, list) or isinstance(past_key_values, tuple):
-                        past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+                        past_key_values = from_legacy_cache(past_key_values)
 
                     result = self.model.llm(
                         inputs_embeds=inputs_embeds,
@@ -1475,7 +1478,7 @@ class FunAsrNanoConverterWrapper(GenerationMixin) :
                         return_dict=True,
                     )
 
-                    return result.logits, result.past_key_values.to_legacy_cache()
+                    return result.logits, to_legacy_cache(result.past_key_values)
 
         self.ov_model_path = Path(ov_model_path)
         self.ov_audio_path = self.ov_model_path  / FUNASR_Audio_Encoder_MODEL_NAME
@@ -1769,7 +1772,7 @@ class FunAsrNanoConverterWrapper(GenerationMixin) :
                 past_key_values=past_key_values,
             )
             outputs = CausalLMOutputWithPast(logits=logits, 
-                        past_key_values=DynamicCache.from_legacy_cache(past_key_values))
+                        past_key_values=from_legacy_cache(past_key_values))
             return outputs
 
     def convert_ov_decoder_model(self, inputs_embeds, attention_mask,
@@ -1782,7 +1785,7 @@ class FunAsrNanoConverterWrapper(GenerationMixin) :
             output_names = ["logits"]
 
             if isinstance(past_key_values, DynamicCache):
-                past_key_values = past_key_values.to_legacy_cache()
+                past_key_values = to_legacy_cache(past_key_values)
             for i, cache in enumerate(past_key_values):
                 input_names.extend([f"key_values.{i}.key", f"key_values.{i}.value"])
                 output_names.extend([f"present.{i}.key", f"present.{i}.value"])

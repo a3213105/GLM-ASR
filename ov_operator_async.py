@@ -1,26 +1,28 @@
 from array import array
+import copy
+from datetime import datetime
+import json
 from locale import ABDAY_1
 import numpy as np
-from datetime import datetime
 from openvino import Core,Model, get_version, AsyncInferQueue, InferRequest, Layout, Type, Tensor
 from openvino.preprocess import PrePostProcessor, ColorFormat, ResizeAlgorithm
 import os
-import copy
 from pathlib import Path
-from typing import Optional, Tuple, Callable, Any, Union
-import json
-import string
 import random
 import re
-import types
+import string
 import time
-
+from transformers import AutoConfig, AutoTokenizer
+from transformers.audio_utils import make_list_of_audio
+from transformers.configuration_utils import PretrainedConfig
+from transformers.feature_extraction_utils import BatchFeature
 from transformers.generation import GenerationMixin, GenerationConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers import AutoConfig
-import torch
-from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto import CONFIG_MAPPING, AutoConfig
+from transformers.processing_utils import ProcessorMixin, ProcessingKwargs
+import torch
+import types
+from typing import Optional, Tuple, Callable, Any, Union
 
 class OV_Operator(object):
     core = None
@@ -402,11 +404,6 @@ class GlmAsrConfig(PretrainedConfig):
 
         super().__init__(**kwargs)
 
-from transformers.processing_utils import ProcessorMixin, ProcessingKwargs
-from transformers.audio_utils import make_list_of_audio
-from transformers import AutoTokenizer
-from transformers.feature_extraction_utils import BatchFeature
-
 class GlmAsrProcessorKwargs(ProcessingKwargs, total=False):
     _defaults = {
         "text_kwargs": {
@@ -423,7 +420,6 @@ class GlmAsrProcessorKwargs(ProcessingKwargs, total=False):
             "padding_side": "left",
         },
     }
-
 
 class GlmAsrProcessor(ProcessorMixin):
     attributes = ["feature_extractor", "tokenizer"]  # ProcessorMixin 需要
@@ -979,10 +975,10 @@ def forced_align(log_probs: torch.Tensor, targets: torch.Tensor, blank: int = 0)
         print(f"### forced_align failed: {e}")
     return items
 
-
 class FunAsrNanoEncDecModel(BaseEncDecGenModel) :
     def __init__(self, ov_core, model_path, enc_type, dec_type, cache_size, for_dialect=True, disable_ctc=False):
         self.disable_ctc = disable_ctc
+        self.using_ctc = not disable_ctc
         self.load_ov_config_once = False
         self.for_dialect = for_dialect
         super().__init__(ov_core, model_path, enc_type, dec_type, cache_size)
